@@ -27,13 +27,14 @@ function wp_print_main_html()
         getForm();
     }
 
+
 }
 
-function getForm(){
-    //BD
-    global $wpdb;
-    $meta_value = $wpdb->get_results("SELECT meta_value FROM adp_posts INNER JOIN adp_postmeta ON adp_posts.ID = adp_postmeta.post_id WHERE adp_postmeta.meta_key = '_role_based_price'");
-    $meta_value = unserialize($meta_value[0]->meta_value);
+function getForm()
+{
+    $label_price = getLabel();
+
+    /*Generate form*/
     ?>
     <div class="wrap">
         <h1>Imprimer les prix</h1>
@@ -42,7 +43,7 @@ function getForm(){
             <select name="groupe" id="groupe">
                 <option value="tous">Tous</option>
                 <?php
-                foreach ($meta_value as $key => $value) {
+                foreach ($label_price as $key => $value) {
                     ?>
                     <option value="<?= $key ?>"><?= $key ?></option>
                     <?php
@@ -57,10 +58,6 @@ function getForm(){
 
 function getPrice($groupe)
 {
-    //BD
-    global $wpdb;
-    $all = $wpdb->get_results("SELECT ID,post_title,meta_value FROM adp_posts INNER JOIN adp_postmeta ON adp_posts.ID = adp_postmeta.post_id WHERE adp_postmeta.meta_key = '_role_based_price'");
-
     //Create first row
     $list = [
         [
@@ -68,22 +65,34 @@ function getPrice($groupe)
             'Titre',
         ],
     ];
-    $label = unserialize($all[0]->meta_value);
+    $label =  getLabel();
+
+    /*If groupe 'tous' is selected*/
     if ($groupe == "tous") {
+
         foreach ($label as $key => $value) {
+
             $list[0][] = 'Prix ' . $key;
             $list[0][] = 'Prix promo ' . $key;
+
         }
+
     } else {
+
         foreach ($label as $key => $value) {
+
             if ($key == $groupe) {
+
                 $list[0][] = 'Prix ' . $key;
                 $list[0][] = 'Prix promo ' . $key;
+
             }
+
         }
+
     }
 
-//Display table
+    /*Display table*/
     ?>
     <div class="wrap">
         <h1><?= $groupe ?></h1>
@@ -97,44 +106,61 @@ function getPrice($groupe)
                 ?>
             </tr>
             <?php
-            foreach ($all as $one): ?>
-                <?php
-                $array = [];
-                foreach ($one as $key => $value) {
-                    if ($key == "meta_value") {
-                        $role_based_price = unserialize($value);
-                        if ($groupe == "tous") {
-                            foreach ($role_based_price as $groupe_x) {
-                                foreach ($groupe_x as $x_price) {
-                                    $array[] = $x_price;
-                                }
-                            }
-                        } else {
-                            foreach ($role_based_price as $key => $groupe_x) {
-                                if ($key == $groupe) {
-                                    foreach ($groupe_x as $x_price) {
-                                        $array[] = $x_price;
-                                    }
-                                }
+
+            query_posts(['post_type' => 'product']);
+
+            /*Defined number of column of price for the table*/
+            $case = 0;
+            while (have_posts()){
+                the_post();
+                $based_price = get_post_meta(get_the_ID(), '_role_based_price', true);
+                $enable_based_price = get_post_meta(get_the_ID(), '_enable_role_based_price', true);
+                if ($enable_based_price == 1 && count($based_price) > $case){
+                    $case = count($based_price);
+                }
+
+            }
+
+            /*Generate row for the table*/
+            while (have_posts()) : the_post();
+
+                $based_price = get_post_meta(get_the_ID(), '_role_based_price', true);
+                $enable_based_price = get_post_meta(get_the_ID(), '_enable_role_based_price', true);
+                if ($enable_based_price == 1):
+                    $current_case = count($based_price);
+                    echo "<tr><td>".get_the_ID()."</td><td>" . get_the_title() . "</td>";
+                    if ($groupe == 'tous'){
+
+                        foreach ($based_price as $price) {
+                            echo "<td>" . $price["regular_price"] . "</td><td>" . $price["selling_price"] . "</td>";
+                        }
+                        if ($current_case < $case){
+                            $boucle = $case - $current_case;
+                            for ($i = 1; $i <= $boucle; $i++ ){
+                                echo "<td></td><td></td>";
                             }
                         }
-                    } else {
-                        $array[] = $value;
+
+                    }
+                    else{
+
+                        foreach ($based_price as $key => $price){
+                            if ($key == $groupe){
+                                echo "<td>" . $price["regular_price"] . "</td><td>" . $price["selling_price"] . "</td>";
+                            }
+                        }
                     }
 
-                }
-                $list [] = $array;
-                ?>
-                <tr>
-                    <?php
-                    foreach ($array as $value) {
-                        echo "<td>" . $value . "</td>";
-                    }
-                    ?>
-                </tr>
-            <?php endforeach;
+
+                    echo "</tr>";
+
+                endif;
+
+            endwhile;
+
+            /*Générate CSV*/
             $path = wp_upload_dir();   // or where ever you want the file to go
-            wp_delete_file( $path['path'] . "/price_" . $groupe . ".csv" );
+            wp_delete_file($path['path'] . "/price_" . $groupe . ".csv");
             $outstream = fopen($path['path'] . "/price_" . $groupe . ".csv", "w");  // the file name you choose
 
             foreach ($list as $line) {
@@ -144,9 +170,32 @@ function getPrice($groupe)
             ?>
         </table>
         <?php
+        /*Generate link to download CSV*/
         echo '<p></p><a href="' . $path['url'] . '/price_' . $groupe . '.csv">Télécharger CSV</a></p>';  //make a link to the file so the user can download.
         ?>
 
     </div>
     <?php
+}
+
+/*Get Label price*/
+function getLabel(){
+    query_posts(['post_type' => 'product', 'meta_key' => '_role_based_price']);
+    $nb_price = 0;
+    $label_price =[];
+
+    while (have_posts()){
+        the_post();
+        $based_price = get_post_meta(get_the_ID(), '_role_based_price', true);
+        $enable_based_price = get_post_meta(get_the_ID(), '_enable_role_based_price', true);
+        if ($enable_based_price == 1){
+            if (count($based_price) > $nb_price){
+                $nb_price = count($based_price);
+                foreach ($based_price as $key => $value){
+                    $label_price[$key] = $value;
+                }
+            }
+        }
+    }
+    return $label_price;
 }
